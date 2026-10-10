@@ -1,0 +1,97 @@
+services:
+  cassandra-1:
+    image: cassandra:${CASSANDRA_VERSION}
+    container_name: cassandra-1
+    environment:
+      - CASSANDRA_CLUSTER_NAME=${CASSANDRA_CLUSTER_NAME}
+      - CASSANDRA_ENDPOINT_SNITCH=GossipingPropertyFileSnitch
+      - CASSANDRA_DC=${CASSANDRA_DC}
+      - CASSANDRA_RACK=${CASSANDRA_RACK}
+      - JVM_OPTS=${JVM_OPTS}
+    command: >
+      bash -c "
+      sed -i 's/authenticator: AllowAllAuthenticator/authenticator: PasswordAuthenticator/' /etc/cassandra/cassandra.yaml &&
+      sed -i 's/authorizer: AllowAllAuthorizer/authorizer: CassandraAuthorizer/' /etc/cassandra/cassandra.yaml &&
+      sed -i 's/user_defined_functions_enabled: false/user_defined_functions_enabled: true/' /etc/cassandra/cassandra.yaml &&
+      sed -i 's/materialized_views_enabled: false/materialized_views_enabled: true/' /etc/cassandra/cassandra.yaml &&
+      docker-entrypoint.sh cassandra -f
+      "
+    ports:
+      - "9042:9042"
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -u cassandra -p cassandra -e 'DESCRIBE CLUSTER' || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+
+  cassandra-2:
+    image: cassandra:${CASSANDRA_VERSION}
+    container_name: cassandra-2
+    depends_on:
+      cassandra-1:
+        condition: service_healthy
+    environment:
+      - CASSANDRA_SEEDS=cassandra-1
+      - CASSANDRA_CLUSTER_NAME=${CASSANDRA_CLUSTER_NAME}
+      - CASSANDRA_ENDPOINT_SNITCH=GossipingPropertyFileSnitch
+      - CASSANDRA_DC=${CASSANDRA_DC}
+      - CASSANDRA_RACK=${CASSANDRA_RACK}
+      - JVM_OPTS=${JVM_OPTS}
+    command: >
+      bash -c "
+      sed -i 's/authenticator: AllowAllAuthenticator/authenticator: PasswordAuthenticator/' /etc/cassandra/cassandra.yaml &&
+      sed -i 's/authorizer: AllowAllAuthorizer/authorizer: CassandraAuthorizer/' /etc/cassandra/cassandra.yaml &&
+      sed -i 's/user_defined_functions_enabled: false/user_defined_functions_enabled: true/' /etc/cassandra/cassandra.yaml &&
+      sed -i 's/materialized_views_enabled: false/materialized_views_enabled: true/' /etc/cassandra/cassandra.yaml &&
+      docker-entrypoint.sh cassandra -f
+      "
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -u cassandra -p cassandra -e 'DESCRIBE CLUSTER' || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+
+  cassandra-3:
+    image: cassandra:${CASSANDRA_VERSION}
+    container_name: cassandra-3
+    depends_on:
+      cassandra-2:
+        condition: service_healthy
+    environment:
+      - CASSANDRA_SEEDS=cassandra-1
+      - CASSANDRA_CLUSTER_NAME=${CASSANDRA_CLUSTER_NAME}
+      - CASSANDRA_ENDPOINT_SNITCH=GossipingPropertyFileSnitch
+      - CASSANDRA_DC=${CASSANDRA_DC}
+      - CASSANDRA_RACK=${CASSANDRA_RACK}
+      - JVM_OPTS=${JVM_OPTS}
+    command: >
+      bash -c "
+      sed -i 's/authenticator: AllowAllAuthenticator/authenticator: PasswordAuthenticator/' /etc/cassandra/cassandra.yaml &&
+      sed -i 's/authorizer: AllowAllAuthorizer/authorizer: CassandraAuthorizer/' /etc/cassandra/cassandra.yaml &&
+      sed -i 's/user_defined_functions_enabled: false/user_defined_functions_enabled: true/' /etc/cassandra/cassandra.yaml &&
+      sed -i 's/materialized_views_enabled: false/materialized_views_enabled: true/' /etc/cassandra/cassandra.yaml &&
+      docker-entrypoint.sh cassandra -f
+      "
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -u cassandra -p cassandra -e 'DESCRIBE CLUSTER' || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+
+  cassandra-init:
+    image: python:3.11-slim
+    container_name: cassandra-init
+    depends_on:
+      cassandra-1:
+        condition: service_healthy
+      cassandra-2:
+        condition: service_healthy
+      cassandra-3:
+        condition: service_healthy
+    volumes:
+      - ./scripts:/scripts
+      - ./data:/data
+    environment:
+      - APP_USER=${APP_USER}
+      - APP_PASSWORD=${APP_PASSWORD}
+    command: bash -c "pip install cassandra-driver && python /scripts/init.py"

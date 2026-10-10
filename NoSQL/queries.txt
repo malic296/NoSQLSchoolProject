@@ -1,0 +1,163 @@
+================================================================================
+SEMESTRÁLNÍ PRÁCE: 15 NETRIVIÁLNÍCH DOTAZŮ (APACHE CASSANDRA)
+Dataset: Olist E-commerce
+================================================================================
+
+--- 1. Práce s clusterem: Rozložení dat (Token Ring) ---
+Zadání: Jak databáze distribuuje objednávky mezi jednotlivé uzly v clusteru?
+Příkaz:
+SELECT token(order_id), order_id, status FROM school_project.orders LIMIT 5;
+Výstup:
+[VLOŽ VÝSTUP Z KONZOLE - ukáže se dlouhé číslo tokenu a ID]
+Vysvětlení: Cassandra nepoužívá B-stromy pro primární indexaci, ale hashovací funkci (Murmur3), která z Partition Key (zde `order_id`) vypočítá token (od -2^63 do 2^63-1). Tento token určuje, na kterém uzlu v ringu budou data uložena.
+Interpretace: Vidíme, že i když vložíme objednávky v určitém čase za sebou, jejich tokeny jsou náhodně rozprostřeny, což zabraňuje vzniku "hotspots" (přetížení jednoho uzlu).
+
+--- 2. Práce s clusterem: Úroveň konzistence a replikace ---
+Zadání: Jak se databáze chová při čtení, pokud vyžadujeme shodu všech replik (RF=3)?
+Příkaz:
+CONSISTENCY ALL;
+SELECT * FROM school_project.orders LIMIT 1;
+CONSISTENCY ONE; -- vrácení do normálu
+Výstup:
+[VLOŽ VÝSTUP Z KONZOLE]
+Vysvětlení: Příkazem `CONSISTENCY ALL` nutíme koordinátora (uzel, kterého jsme se zeptali), aby před vrácením výsledku získal potvrzení od všech 3 uzlů, kde jsou data uložena (protože náš Replication Factor je 3).
+Interpretace: Pokud by v tuto chvíli jeden uzel nebyl dostupný, dotaz selže. V e-commerce je pro čtení lepší konzistence `ONE` nebo `QUORUM`, abychom preferovali dostupnost (A z CAP teorému).
+
+--- 3. Práce s clusterem: Simulace výpadku uzlu a zotavení ---
+Zadání: Jak systém reaguje na výpadek uzlu při čtení s konzistencí QUORUM?
+Příkaz (spouští se zvenčí v terminálu a v cqlsh):
+1. V cqlsh: CONSISTENCY QUORUM;
+2. V terminálu: docker compose stop cassandra-2
+3. V cqlsh: SELECT * FROM school_project.orders LIMIT 1;
+4. V terminálu: docker compose start cassandra-2
+5. V terminálu: docker compose exec cassandra-1 nodetool status
+Výstup:
+[VLOŽ VÝSTUP Z KONZOLE - ukaž, že SELECT prošel i s vypnutým uzlem]
+Vysvětlení: Při `QUORUM` (RF/2 + 1) nám stačí odpověď ze 2 uzlů. I když `cassandra-2` spadla, uzly 1 a 3 dotaz odbavily.
+Interpretace: Systém je vysoce dostupný (AP v rámci CAP teorému). E-shop nepřestane fungovat ani při hardwarové chybě jednoho serveru. Zápisy by v tu chvíli mohly využít "Hinted Handoff".
+
+--- 4. Povinné porovnání (Část A): Dotaz přes SAI Index ---
+Zadání: Najdi všechny objednávky zákazníka, které byly doručeny, pomocí sekundárního indexu.
+Příkaz:
+TRACING ON;
+SELECT * FROM school_project.orders WHERE status = 'delivered' LIMIT 10;
+TRACING OFF;
+Výstup:
+[VLOŽ VÝSTUP Z KONZOLE - včetně výpisu TRACING]
+Vysvětlení: Používáme Storage-Attached Index (SAI) nad sloupcem `status`. TRACING ukazuje, jak se dotaz rozesílá na všechny uzly v clusteru (scatter-gather), protože databáze neví, na jakém uzlu leží doručené objednávky (Partition Key je `order_id`).
+Interpretace: Dotaz sice vrátí výsledek, ale v produkci je extrémně nákladný, protože prohledává celý cluster.
+
+--- 5. Povinné porovnání (Část B): Dotaz přes denormalizovanou tabulku ---
+Zadání: Optimalizuj dotaz z bodu 4 vytvořením tabulky speciálně navržené pro tento vzor čtení.
+Příkaz:
+CREATE TABLE school_project.orders_by_status (status text, order_id text, purchase_timestamp timestamp, PRIMARY KEY (status, purchase_timestamp)) WITH CLUSTERING ORDER BY (purchase_timestamp DESC);
+INSERT INTO school_project.orders_by_status (status, order_id, purchase_timestamp) VALUES ('delivered', 'test-order-1', '2018-01-01 10:00:00');
+TRACING ON;
+SELECT * FROM school_project.orders_by_status WHERE status = 'delivered' LIMIT 10;
+TRACING OFF;
+Výstup:
+[VLOŽ VÝSTUP Z KONZOLE - TRACING bude mnohem kratší]
+Vysvětlení: V této tabulce je `status` rovnou Partition Key. TRACING ukazuje, že dotaz jde přímo na jeden konkrétní uzel, který tento status obsluhuje.
+Interpretace: Ukázkový příklad návrhu "Query-First" v NoSQL. Denormalizace (uložení dat podruhé) radikálně snižuje latenci čtení na úkor místa na disku a nutnosti udržovat dvě tabulky při zápisu.
+
+--- 6. Práce s Materialized Views (MV) ---
+Zadání: Získej seznam produktů podle kategorie (v originální tabulce je PK `product_id`).
+Příkaz:
+CREATE MATERIALIZED VIEW school_project.products_by_category AS
+SELECT category_name, product_id, weight_g FROM school_project.products
+WHERE category_name IS NOT NULL AND product_id IS NOT NULL
+PRIMARY KEY (category_name, product_id);
+
+SELECT * FROM school_project.products_by_category WHERE category_name = 'perfumaria' LIMIT 5;
+Výstup:
+[VLOŽ VÝSTUP Z KONZOLE]
+Vysvětlení: Databáze automaticky udržuje asynchronní kopii dat strukturovanou podle nového Partition Key (`category_name`).
+Interpretace: Nemusíme manuálně zapisovat do dvou tabulek (jako v dotazu 5). Nevýhodou je občasná nekonzistence (eventual consistency) při vysoké zátěži zápisu.
+
+--- 7. Uživatelské funkce (UDF) ---
+Zadání: Vypočítej cenu dopravy do České republiky (převod z BRL na CZK, kurz např. 4.5).
+Příkaz:
+CREATE OR REPLACE FUNCTION school_project.brl_to_czk(amount double)
+CALLED ON NULL INPUT RETURNS double LANGUAGE java AS 'return Double.valueOf(amount.doubleValue() * 4.5);';
+
+SELECT order_id, freight_value, school_project.brl_to_czk(freight_value) AS freight_czk FROM school_project.order_items LIMIT 5;
+Výstup:
+[VLOŽ VÝSTUP Z KONZOLE]
+Vysvětlení: Využíváme Javu k vytvoření vlastní server-side funkce (UDF), která se spouští přímo na uzlech clusteru.
+Interpretace: Aplikace nemusí stahovat všechna data po síti, výpočet proběhne rovnou v databázi.
+
+--- 8. Clustering Columns a řazení dat ---
+Zadání: Najdi všechny položky konkrétní objednávky (vyber libovolné existující `order_id` z DB) seřazené podle ID položky.
+Příkaz:
+SELECT * FROM school_project.order_items WHERE order_id = 'e481f51cbdc54678b7cc49136f2d6af7' ORDER BY order_item_id DESC;
+Výstup:
+[VLOŽ VÝSTUP Z KONZOLE]
+Vysvětlení: Clustering Key (`order_item_id`) garantuje, že data na disku jsou fyzicky uložena vedle sebe a seřazena. `ORDER BY` lze použít jen na tento klíč.
+Interpretace: Extrémně rychlé čtení časových řad a událostí, nemusíme provádět žádný drahý sort in-memory (jako např. v SQL).
+
+--- 9. Filtrování s omezením (ALLOW FILTERING) ---
+Zadání: Najdi v tabulce produktů všechny parfémy s váhou nad 1000g.
+Příkaz:
+SELECT * FROM school_project.products WHERE category_name = 'perfumaria' AND weight_g > 1000 ALLOW FILTERING;
+Výstup:
+[VLOŽ VÝSTUP Z KONZOLE]
+Vysvětlení: Databáze musí projít všechny záznamy v clusteru, u kterých nezná Partition Key, a ručně je filtrovat, což vyžaduje direktivu `ALLOW FILTERING`.
+Interpretace: V produkci je to nebezpečný anti-pattern, protože může způsobit pád paměti u rozsáhlých dat. Dotaz ukazuje limitace modelování v Cassandře a potřebu SAI indexů nebo MV.
+
+--- 10. Lightweight Transactions (LWT) ---
+Zadání: Změň stav objednávky na 'shipped', ale pouze pokud je aktuální stav 'processing' (ochrana proti souběhu).
+Příkaz:
+UPDATE school_project.orders SET status = 'shipped' WHERE order_id = 'test-order-1' IF status = 'processing';
+Výstup:
+[VLOŽ VÝSTUP Z KONZOLE - ukáže se tabulka s [applied] False/True]
+Vysvětlení: Kláuzule `IF` spouští mechanismus Paxos (čtení-před-zápisem). Cluster provede konsensus, zda hodnota opravdu odpovídá podmínce.
+Interpretace: Klasický NoSQL obvykle nemá ACID transakce. LWT poskytuje linearizovatelnou konzistenci pro bezpečné operace (např. stržení peněz z peněženky), ale za cenu 4x vyšší latence.
+
+--- 11. Zápis s expirační dobou (TTL) ---
+Zadání: Vlož produkt do virtuálního nákupního košíku, který má expiraci 60 sekund.
+Příkaz:
+INSERT INTO school_project.orders (order_id, customer_id, status) VALUES ('cart-tmp-123', 'cust-001', 'in_cart') USING TTL 60;
+SELECT order_id, TTL(status) FROM school_project.orders WHERE order_id = 'cart-tmp-123';
+Výstup:
+[VLOŽ VÝSTUP Z KONZOLE]
+Vysvětlení: Time-To-Live (TTL) zajistí, že databáze po 60 sekundách označí záznam tombstonem a sama ho při nejbližší kompresi smaže.
+Interpretace: Skvělá vlastnost pro dočasná data (session management, caching, logování), která eliminuje nutnost psát externí "čistící" cron skripty.
+
+--- 12. Čtení velkého objemu dat pomocí Token Range Scan ---
+Zadání: Přečti náhodný vzorek objednávek iterací přes token ring.
+Příkaz:
+SELECT token(order_id), order_id FROM school_project.orders WHERE token(order_id) > 0 LIMIT 5;
+Výstup:
+[VLOŽ VÝSTUP Z KONZOLE]
+Vysvětlení: Místo plného table scanu (`SELECT *`), který by u velkých dat přetížil koordinátora, filtrujeme podle hodnoty vygenerovaného tokenu.
+Interpretace: Toto je jediný bezpečný způsob, jak v Big Data ekosystému (např. přes Spark) stránkovat a paralelně zpracovávat miliardy řádků v Cassandře.
+
+--- 13. Použití kolekce (Set/List) v databázi ---
+Zadání: Přidej k existující objednávce pole pro štítky a doplň tam zákaznickou poznámku.
+Příkaz:
+ALTER TABLE school_project.orders ADD tags set<text>;
+UPDATE school_project.orders SET tags = tags + {'vip_customer', 'fragile'} WHERE order_id = 'e481f51cbdc54678b7cc49136f2d6af7';
+SELECT order_id, tags FROM school_project.orders WHERE order_id = 'e481f51cbdc54678b7cc49136f2d6af7';
+Výstup:
+[VLOŽ VÝSTUP Z KONZOLE]
+Vysvětlení: Datový typ `set` umožňuje atomicky přidávat položky (bez čtení před zápisem) do jedné buňky.
+Interpretace: Skvělé pro denormalizaci detailů, které nepotřebujeme samostatně indexovat, např. tagy, telefonní čísla, JSON konfigurace uživatele.
+
+--- 14. Využití operátoru IN nad Partition Key ---
+Zadání: Načti detaily o třech konkrétních objednávkách jedním dotazem.
+Příkaz:
+SELECT * FROM school_project.orders WHERE order_id IN ('e481f51cbdc54678b7cc49136f2d6af7', '53cdb2fc8bc7dce0b6741e2150273451');
+Výstup:
+[VLOŽ VÝSTUP Z KONZOLE]
+Vysvětlení: Dotazujeme se na více specifických oddílů (partitions) najednou.
+Interpretace: Lepší než dělat 3 samostatné SELECTy, ale u velkého množství hodnot `IN` může způsobit zpoždění, protože koordinátor musí sbírat data z mnoha různých uzlů. Používat opatrně.
+
+--- 15. Kombinace SAI Indexu a Partition Key ---
+Zadání: Najdi položku s cenou nad 150 BRL u konkrétní objednávky.
+Příkaz:
+CREATE CUSTOM INDEX IF NOT EXISTS price_sai ON school_project.order_items (price) USING 'StorageAttachedIndex';
+SELECT * FROM school_project.order_items WHERE order_id = 'e481f51cbdc54678b7cc49136f2d6af7' AND price > 150.0;
+Výstup:
+[VLOŽ VÝSTUP Z KONZOLE]
+Vysvětlení: První podmínka (`order_id`) zafixuje dotaz na jeden konkrétní server (partition key). Druhá podmínka (`price > 150`) využije lokální SAI index k rychlému vyhledání na disku bez procházení všech řádků.
+Interpretace: Toto je nejeffektivnější způsob využití SAI indexu. Nezatěžujeme cluster (scatter-gather) a zároveň nevyhledáváme sekvenčně na disku.
