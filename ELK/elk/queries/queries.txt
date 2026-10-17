@@ -1,0 +1,85 @@
+================================================================================
+SEMESTRÁLNÍ PRÁCE: REST API DOTAZY (ELASTICSEARCH)
+Dataset: Letecká doprava (Lety, Letiště, Aerolinky)
+================================================================================
+
+--- 1. Fulltextové vyhledávání (Match) ---
+Zadání: Najdi všechna letiště, která mají v názvu "International" nebo se nacházejí ve státě "TX" (Texas).
+Dotaz:
+GET airports-000001/_search
+{
+  "size": 5,
+  "query": {
+    "bool": {
+      "should": [
+        { "match": { "AIRPORT": "International" } },
+        { "match": { "STATE": "TX" } }
+      ]
+    }
+  }
+}
+
+--- 2. Geoprostorové vyhledávání (Geo Distance) ---
+Zadání: Najdi všechna letiště v okruhu 300 km od letiště JFK v New Yorku (souřadnice: 40.639, -73.778).
+Dotaz:
+GET airports-000001/_search
+{
+  "query": {
+    "geo_distance": {
+      "distance": "300km",
+      "location": {
+        "lat": 40.6397,
+        "lon": -73.7789
+      }
+    }
+  }
+}
+
+--- 3. Metrická agregace (Average) ---
+Zadání: Zjisti průměrné zpoždění na příletu (ARRIVAL_DELAY) pro všechny lety v databázi.
+Dotaz:
+GET flights-000001/_search
+{
+  "size": 0,
+  "aggs": {
+    "prumERNE_zpozdeni_priletu": {
+      "avg": {
+        "field": "ARRIVAL_DELAY"
+      }
+    }
+  }
+}
+
+--- 4. Bucket agregace (Terms / Top 5) ---
+Zadání: Zjisti 5 aerolinek, které v našem datasetu uskutečnily nejvíce letů.
+Dotaz:
+GET flights-000001/_search
+{
+  "size": 0,
+  "aggs": {
+    "top_5_aerolinek": {
+      "terms": {
+        "field": "AIRLINE",
+        "size": 5
+      }
+    }
+  }
+}
+
+--- 5. Komplexní Boolean dotaz s rozsahem (Range) ---
+Zadání: Najdi konkrétní lety aerolinky 'WN' (Southwest Airlines), které měly zpoždění na odletu větší než 60 minut.
+Dotaz:
+GET flights-000001/_search
+{
+  "size": 5,
+  "query": {
+    "bool": {
+      "must": [
+        { "term": { "AIRLINE": "WN" } }
+      ],
+      "filter": [
+        { "range": { "DEPARTURE_DELAY": { "gt": 60 } } }
+      ]
+    }
+  }
+}

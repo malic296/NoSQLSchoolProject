@@ -158,6 +158,8 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+ELK/.env
+NoSQL/.env
 
 # Spyder project settings
 .spyderproject

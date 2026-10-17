@@ -1,0 +1,12 @@
+- pipeline.id: flights_part1
+  path.config: "/usr/share/logstash/pipeline/kolekce1_soubor1.conf"
+- pipeline.id: flights_part2
+  path.config: "/usr/share/logstash/pipeline/kolekce1_soubor2.conf"
+- pipeline.id: airports_part1
+  path.config: "/usr/share/logstash/pipeline/kolekce2_soubor1.conf"
+- pipeline.id: airports_part2
+  path.config: "/usr/share/logstash/pipeline/kolekce2_soubor2.conf"
+- pipeline.id: airlines_part1
+  path.config: "/usr/share/logstash/pipeline/kolekce3_soubor1.conf"
+- pipeline.id: airlines_part2
+  path.config: "/usr/share/logstash/pipeline/kolekce3_soubor2.conf"

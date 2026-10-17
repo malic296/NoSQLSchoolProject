@@ -1,0 +1,26 @@
+{
+  "index_patterns": ["flights-*"],
+  "template": {
+    "settings": {
+      "number_of_shards": 1,
+      "number_of_replicas": 0
+    },
+    "mappings": {
+      "properties": {
+        "YEAR": { "type": "integer" },
+        "MONTH": { "type": "integer" },
+        "DAY": { "type": "integer" },
+        "DAY_OF_WEEK": { "type": "integer" },
+        "AIRLINE": { "type": "keyword" },
+        "FLIGHT_NUMBER": { "type": "keyword" },
+        "TAIL_NUMBER": { "type": "keyword" },
+        "ORIGIN_AIRPORT": { "type": "keyword" },
+        "DESTINATION_AIRPORT": { "type": "keyword" },
+        "DEPARTURE_DELAY": { "type": "integer" },
+        "ARRIVAL_DELAY": { "type": "integer" },
+        "DISTANCE": { "type": "integer" },
+        "timestamp": { "type": "date", "format": "yyyy-MM-dd||yyyy-M-d" }
+      }
+    }
+  }
+}

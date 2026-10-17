@@ -1,0 +1,15 @@
+{
+  "index_patterns": ["airlines-*"],
+  "template": {
+    "settings": {
+      "number_of_shards": 1,
+      "number_of_replicas": 0
+    },
+    "mappings": {
+      "properties": {
+        "IATA_CODE": { "type": "keyword" },
+        "AIRLINE": { "type": "text", "fields": { "keyword": { "type": "keyword" } } }
+      }
+    }
+  }
+}

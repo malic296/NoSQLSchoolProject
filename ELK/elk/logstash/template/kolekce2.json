@@ -1,0 +1,19 @@
+{
+  "index_patterns": ["airports-*"],
+  "template": {
+    "settings": {
+      "number_of_shards": 1,
+      "number_of_replicas": 0
+    },
+    "mappings": {
+      "properties": {
+        "IATA_CODE": { "type": "keyword" },
+        "AIRPORT": { "type": "text" },
+        "CITY": { "type": "keyword" },
+        "STATE": { "type": "keyword" },
+        "COUNTRY": { "type": "keyword" },
+        "location": { "type": "geo_point" }
+      }
+    }
+  }
+}
